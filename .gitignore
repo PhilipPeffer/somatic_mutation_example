@@ -4,6 +4,6 @@
 *.egg-info
 
 # genome files
-*.fasta.fai
+*.fasta.*
 *.fasta
 *.dict
