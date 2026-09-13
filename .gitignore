@@ -3,7 +3,8 @@
 .pixi
 *.egg-info
 
-# genome files
+# reference genome and variant truth set files
 *.fasta.*
 *.fasta
 *.dict
+*.vcf.*
