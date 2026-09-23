@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 5: base quality score recalibration (GATK BaseRecalibrator equivalent)
+# Step 6: base quality score recalibration (GATK BaseRecalibrator equivalent)
 # plus genome-wide coverage metrics (Picard CollectWgsMetrics equivalent),
 # in a single pass over the deduplicated BAM.
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 7: QC summary, MultiQC report and a machine-readable run manifest
+# Step 8: QC summary, MultiQC report and a machine-readable run manifest
 # (everything needed to reproduce or audit the run), then clean up the
 # intermediate BAMs in S3.
 
@@ -35,6 +35,9 @@ make_report() {
     --arg samtools "$(samtools --version 2>/dev/null | head -1)" \
     --arg bcftools "$(bcftools --version 2>/dev/null | head -1)" \
     --arg sratools "$(fasterq-dump --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" \
+    --arg fastqc "$(fastqc --version 2>/dev/null | head -1)" \
+    --arg trim_galore "$(trim_galore --version 2>/dev/null | head -1)" \
+    --arg run_fastqc "${RUN_FASTQC:-1}" --arg trim_reads "${TRIM_READS:-0}" --arg trim_args "${TRIM_ARGS:-}" \
     --arg pixi_lock_sha256 "$(sha256sum "$REPO_DIR/pixi.lock" | cut -d' ' -f1)" \
     --arg tumor "$TUMOR" --arg normal "$NORMAL" \
     --arg subsample "$SUBSAMPLE_READS" --arg intervals "$CALL_INTERVALS" \
@@ -46,8 +49,10 @@ make_report() {
       instance:{type:$instance_type, id:$instance_id, ami:$ami_id, lifecycle:$lifecycle,
                 region:$region, threads:($threads|tonumber)},
       software:{sentieon:$sentieon, samtools:$samtools, bcftools:$bcftools,
-                sra_tools:$sratools, pixi_lock_sha256:$pixi_lock_sha256},
-      params:{caller:$caller, subsample_reads:($subsample|tonumber), call_intervals:$intervals},
+                sra_tools:$sratools, fastqc:$fastqc, trim_galore:$trim_galore,
+                pixi_lock_sha256:$pixi_lock_sha256},
+      params:{caller:$caller, subsample_reads:($subsample|tonumber), call_intervals:$intervals,
+              fastqc:($run_fastqc == "1"), trim_reads:($trim_reads == "1"), trim_args:$trim_args},
       samples:{tumor:$tumor, normal:$normal, sheet:$samples},
       results:{pass_vcf:$pass_vcf, pass_vcf_md5:$pass_vcf_md5,
                pass_snvs:($snvs|tonumber? // null), pass_indels:($indels|tonumber? // null)},

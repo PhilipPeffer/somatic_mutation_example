@@ -12,11 +12,12 @@
 #   0  install Sentieon + license check          (per instance)
 #   1  reference bundle (GRCh38)                 (once per bucket, cached in S3)
 #   2  SRA -> paired FASTQ.gz                    (once per read group, cached in S3)
-#   3  bwa mem + sort, per read group            (checkpointed per read group)
-#   4  QC metrics + duplicate marking, per sample
-#   5  base quality score recalibration + coverage metrics, per sample
-#   6  somatic calling + filtering (TNhaplotyper2 by default)
-#   7  QC report + run manifest
+#   3  FastQC (+ optional Trim Galore), per read group  } one checkpoint
+#   4  bwa mem + sort, per read group                    } per read group
+#   5  QC metrics + duplicate marking, per sample
+#   6  base quality score recalibration + coverage metrics, per sample
+#   7  somatic calling + filtering (TNhaplotyper2 by default)
+#   8  QC report + run manifest
 
 set -euo pipefail
 
@@ -85,6 +86,7 @@ STARTED_UTC=$(date -u +%FT%TZ)
 
 log "run=${RUN_ID} git=${GIT_SHA} instance=${INSTANCE_TYPE} threads=${NT} scratch=${SCRATCH}"
 log "caller=${CALLER} subsample_reads=${SUBSAMPLE_READS} call_intervals=${CALL_INTERVALS:-<whole genome>}"
+log "fastqc=${RUN_FASTQC:-1} trim_reads=${TRIM_READS:-0} trim_args=${TRIM_ARGS:-<none>}"
 is_dry_run && log "DRY RUN: external commands are printed, not executed"
 
 load_samples "$SAMPLES_TSV"
@@ -113,20 +115,20 @@ install_sentieon                                                   # 0
 step_at "$REF_S3/_READY" "reference_${GENOME}" prepare_reference   # 1
 fetch_reference
 
-for rg in "${READ_GROUPS[@]}"; do                                   # 2 + 3
+for rg in "${READ_GROUPS[@]}"; do                                   # 2, 3 + 4
   # Skip FASTQ preparation entirely once the read group is aligned.
   if ! s3_exists "$RUN_S3/checkpoints/align_${rg}.done" && [[ "${RG_SOURCE[$rg]}" == sra:* ]]; then
     step_at "$(fastq_s3_prefix "$rg")/_READY" "fastq_${rg}" prepare_fastq_from_sra "$rg"
   fi
-  step "align_${rg}" align_read_group "$rg"
+  step "align_${rg}" align_read_group "$rg"                          # (QC/trim inside)
 done
 
-for sm in "$TUMOR" "$NORMAL"; do                                    # 4 + 5
+for sm in "$TUMOR" "$NORMAL"; do                                    # 5 + 6
   step "dedup_${sm}" metrics_and_dedup "$sm"
   step "bqsr_${sm}"  bqsr_and_coverage "$sm"
 done
 
-step "call_${CALLER}" call_somatic                                  # 6
-step "report" make_report                                           # 7
+step "call_${CALLER}" call_somatic                                  # 7
+step "report" make_report                                           # 8
 
 log "Results: ${RUN_S3}/vcf/  (fetch with: pixi run -e cloud fetch-results)"

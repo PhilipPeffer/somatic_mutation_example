@@ -22,7 +22,7 @@ is_dry_run() { [[ "${DRY_RUN:-0}" == 1 ]]; }
 if is_dry_run; then
   # Stub heavy/external tools: print the invocation and succeed.
   for _tool in sentieon aws curl fasterq-dump fastq-dump pigz bgzip tabix \
-               bcftools samtools multiqc md5sum; do
+               bcftools samtools multiqc md5sum fastqc trim_galore; do
     eval "${_tool}() { printf '[dry-run] %s\n' \"${_tool} \$*\" >&2; }"
   done
   unset _tool

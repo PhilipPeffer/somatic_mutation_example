@@ -64,12 +64,13 @@ pixi run -e cloud fetch-results                   # VCFs, metrics, MultiQC repor
 ## Pipeline
 
 ```
-SRA (AWS Open Data) → FASTQ → Sentieon BWA-MEM + sort → metrics + dedup → BQSR
+SRA (AWS Open Data) → FASTQ → FastQC (+ optional Trim Galore) → Sentieon BWA-MEM + sort → metrics + dedup → BQSR
                    → TNhaplotyper2 (Mutect2-equivalent) + OrientationBias + ContaminationModel → TNfilter
                    → PASS somatic SNV/indel VCF + QC report + run_manifest.json
 ```
 
 - Reference: GRCh38 (Broad hg38 bundle). The public resources are gnomAD for germline AF, the 1000G panel of normals, and dbSNP, Mills and known indels for BQSR. All are pinned with MD5s in [`config/references_hg38.tsv`](config/references_hg38.tsv).
+- Pre-alignment QC: FastQC always runs. Trim Galore trimming is optional (`TRIM_READS=1`) and off by default, because BWA-MEM soft-clips adapters and GATK/Sentieon WGS best practice aligns untrimmed reads. The walkthrough explains when to turn it on.
 - Each step checkpoints to S3. A replacement spot instance resumes where the last one stopped.
 - The instance terminates itself when the run finishes, fails, or hits a hard runtime limit.
 

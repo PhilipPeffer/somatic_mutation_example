@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 4: alignment QC metrics and duplicate marking, per sample (all read
+# Step 5: alignment QC metrics and duplicate marking, per sample (all read
 # groups of the sample are merged here).
 #
 #   MeanQualityByCycle, QualDistribution, GCBias, AlignmentStat,

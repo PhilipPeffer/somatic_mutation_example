@@ -47,7 +47,8 @@ Everything runs from this repository in a GitHub Codespace. There's no workflow 
                                                    │   0 Sentieon + license
                                                    │   1 GRCh38 bundle ◀── public Broad/GATK buckets (cached in S3)
                                                    │   2 FASTQ         ◀── s3://sra-pub-run-odp (AWS Open Data)
-                                                   │   3 align  4 dedup  5 BQSR  6 call  7 report
+                                                   │   3 FastQC (+ optional Trim Galore)  4 align  5 dedup
+                                                   │   6 BQSR  7 call  8 report
                                                    │   each step → s3://BUCKET/runs/<RUN_ID>/checkpoints/*.done
                                                    └─ uploads logs, terminates itself
  pixi run -e cloud status / logs / fetch-results ◀─ s3://BUCKET/runs/<RUN_ID>/
@@ -89,7 +90,7 @@ pixi run -e cloud aws --version        # aws-cli/2.x
 pixi task list -e cloud                # aws-setup, launch, status, logs, fetch-results, teardown, dry-run, lint
 ```
 
-> The `cloud` environment holds the tools the Codespace needs (AWS CLI, jq, shellcheck). The `pipeline` environment holds the tools the EC2 instance needs (samtools, bcftools, htslib, sra-tools, pigz, MultiQC, AWS CLI). Both are pinned exactly in `pixi.lock`. Sentieon itself isn't a conda package; it's installed from its release tarball at a pinned version.
+> The `cloud` environment holds the tools the Codespace needs (AWS CLI, jq, shellcheck). The `pipeline` environment holds the tools the EC2 instance needs (samtools, bcftools, htslib, sra-tools, pigz, FastQC, Trim Galore, MultiQC, AWS CLI). Both are pinned exactly in `pixi.lock`. Sentieon itself isn't a conda package; it's installed from its release tarball at a pinned version.
 
 ### 2b. AWS credentials
 
@@ -129,6 +130,7 @@ Everything else has working defaults:
 - `SENTIEON_VERSION`.
 - `SENTIEON_LICENSE_S3=s3://$BUCKET/license/sentieon.lic`, or `SENTIEON_LICENSE_SERVER=host:port`.
 - `CALLER=tnhaplotyper2`.
+- `RUN_FASTQC=1` and `TRIM_READS=0`: FastQC on, trimming off. See [step 13](#pre-alignment-qc-and-trimming) for why, and when to turn trimming on.
 - `RUN_ID=seqc2_wgs_SRR7890893_vs_SRR7890943_v1`.
 
 `config/samples.tsv` already contains the pair:
@@ -232,6 +234,7 @@ What to check in `results/<RUN_ID>_smoke/`:
 - `logs/pipeline.log` ends with `PIPELINE FINISHED OK`;
 - `vcf/*.tnhaplotyper2.pass.vcf.gz` exists (with 2 M read pairs expect only a handful of calls);
 - `report/run_manifest.json` shows the Sentieon version and instance type.
+- The FastQC section of `report/<RUN_ID>_smoke.multiqc.html`, especially *Adapter Content*. Use it to decide on `TRIM_READS` before the full run.
 
 If the license is the problem, the log fails within the first few minutes with a Sentieon license error. See [Troubleshooting](#15-troubleshooting).
 
@@ -260,6 +263,8 @@ Close the Codespace if you like; the instance works on its own and terminates it
 | boot, NVMe setup, pixi env, Sentieon install | 5–10 min |
 | reference bundle (first run only, then cached) | 5–10 min |
 | SRA → FASTQ.gz, both samples (first run only, then cached) | 1–2 h |
+| FastQC on raw reads | runs alongside alignment; adds ≲ 30 min |
+| Trim Galore (only if `TRIM_READS=1`) | +10–30 min per sample |
 | alignment, both samples | 2.5–4 h |
 | metrics + dedup, both | 40–60 min |
 | BQSR + coverage, both | 30–45 min |
@@ -321,6 +326,8 @@ pixi run -e cloud fetch-results            # add --bams to also download the BAM
 | `vcf/<RUN_ID>.tnhaplotyper2.pass.vcf.gz` (+ `.tbi`) | **final somatic SNVs/indels (`FILTER=PASS`)** |
 | `vcf/<RUN_ID>.tnhaplotyper2.unfiltered.vcf.gz` | raw caller output |
 | `vcf/<RUN_ID>.contamination.txt`, `*_segments.txt`, `*.orientation_priors.txt` | contamination estimate and filter inputs |
+| `metrics/fastqc/<rg>_R{1,2}_fastqc.{html,zip}` | FastQC on the raw reads, per read group |
+| `metrics/trimming/<rg>_R{1,2}.fastq.gz_trimming_report.*` | Trim Galore reports (only if `TRIM_READS=1`) |
 | `metrics/<sample>.*` | alignment, insert size, GC bias, base quality, duplication, WGS coverage (+ PDF plots) |
 | `metrics/<RUN_ID>.*.bcftools_stats.txt` | VCF summary statistics |
 | `report/<RUN_ID>.multiqc.html` | one-page QC report (open it in the browser) |
@@ -406,17 +413,45 @@ All commands are in `pipeline/steps/*.sh`, one short, commented file per step. `
 | 0 | install + license | `sentieon licclnt ping` (server licenses) | — |
 | 1 | reference | Broad hg38 v0 FASTA + bwa index (with `.alt`), dbSNP 138, Mills + known indels, af-only gnomAD, 1000G PON, small_exac_common_3 | GATK resource bundle |
 | 2 | FASTQ | `fasterq-dump --split-3` → `pigz` (smoke test: `fastq-dump -X N`) | — |
-| 3 | align, per read group | `sentieon bwa mem -K 10000000 -R @RG… \| sentieon util sort --sam2bam` | `bwa mem \| samtools sort` |
-| 4 | metrics + dedup, per sample | `driver --algo MeanQualityByCycle/QualDistribution/GCBias/AlignmentStat/InsertSizeMetricAlgo`; `LocusCollector` + `Dedup` | CollectMultipleMetrics; MarkDuplicates |
-| 5 | BQSR + coverage, per sample | `driver --algo QualCal -k dbSNP -k Mills -k known_indels --algo WgsMetricsAlgo` | BaseRecalibrator; CollectWgsMetrics |
-| 6 | somatic calling | `driver -i T -q T.table -i N -q N.table --algo TNhaplotyper2 --germline_vcf gnomAD --pon PON --algo OrientationBias --algo ContaminationModel`, then `--algo TNfilter` | Mutect2 + LearnReadOrientationModel + GetPileupSummaries/CalculateContamination + FilterMutectCalls |
-| 7 | report | `bcftools stats`, MultiQC, `run_manifest.json` | — |
+| 3 | pre-alignment QC, per read group | `fastqc` on raw reads (background); optional `trim_galore --paired` | — |
+| 4 | align, per read group | `sentieon bwa mem -K 10000000 -R @RG… \| sentieon util sort --sam2bam` | `bwa mem \| samtools sort` |
+| 5 | metrics + dedup, per sample | `driver --algo MeanQualityByCycle/QualDistribution/GCBias/AlignmentStat/InsertSizeMetricAlgo`; `LocusCollector` + `Dedup` | CollectMultipleMetrics; MarkDuplicates |
+| 6 | BQSR + coverage, per sample | `driver --algo QualCal -k dbSNP -k Mills -k known_indels --algo WgsMetricsAlgo` | BaseRecalibrator; CollectWgsMetrics |
+| 7 | somatic calling | `driver -i T -q T.table -i N -q N.table --algo TNhaplotyper2 --germline_vcf gnomAD --pon PON --algo OrientationBias --algo ContaminationModel`, then `--algo TNfilter` | Mutect2 + LearnReadOrientationModel + GetPileupSummaries/CalculateContamination + FilterMutectCalls |
+| 8 | report | `bcftools stats`, MultiQC, `run_manifest.json` | — |
 
 Notes:
 - The recalibration tables are applied on the fly (`-q`) during calling, so no second copy of each BAM is written.
 - `TNhaplotyper2` is the default because it needs only public resources and matches the widely used GATK Mutect2 best practice.
 - Sentieon's own `TNscope` caller is available with `CALLER=tnscope`. For WGS, Sentieon recommends using it with their machine-learning model: set `TNSCOPE_MODEL_S3`, plus any model-specific options in `TNSCOPE_ARGS`, as given in the model's documentation.
 - Duplicates are *marked*, not removed.
+
+### Pre-alignment QC and trimming
+
+Settings in `config/pipeline.env`:
+
+| setting | default | effect |
+|---|---|---|
+| `RUN_FASTQC` | `1` | FastQC on each read group's raw R1/R2 |
+| `TRIM_READS` | `0` | `1` = Trim Galore (adapter + 3' quality trimming) before alignment |
+| `TRIM_ARGS` | `""` | extra Trim Galore options, e.g. `"--length 36"` or `"--fastqc"` for post-trim FastQC |
+
+Both tools run inside each read group's align step, on the local FASTQ.
+
+- **FastQC is always worth running.** It's the first look at the raw data: per-base quality, adapter content, GC, overrepresented sequences and poly-G tails. It runs in the background while the reads are aligned, so it costs little wall time. The reports are part of the MultiQC report.
+- **Trimming is optional, and off by default for this WGS variant-calling pipeline:**
+  - BWA-MEM does local alignment and soft-clips adapter read-through and low-quality ends. Those bases don't reach the variant caller.
+  - GATK best practices for germline and somatic short variants, which Sentieon mirrors, align untrimmed reads. BQSR then corrects base-quality miscalibration and TNhaplotyper2 ignores low-quality bases.
+  - Quality trimming makes read lengths uneven and discards data. With 150 bp reads and ~350–450 bp inserts, adapter read-through is rare in standard Illumina WGS libraries.
+- **When to turn it on:**
+  - FastQC's *Adapter Content* plot shows substantial read-through, e.g. short inserts, degraded or FFPE DNA, or low-input libraries.
+  - Nextera/transposase libraries.
+  - Poly-G tails from 2-colour chemistry (NovaSeq, NextSeq). Trim Galore 2.x auto-detects these.
+  - Your lab's SOP requires trimming.
+  Trim Galore 2.x is a fast Rust rewrite, so it adds only minutes per sample. The trimmed reads are temporary; only the reports are kept.
+- **Suggested workflow for this dataset:** run the smoke test and look at FastQC in `report/<RUN_ID>_smoke.multiqc.html`. Then either keep `TRIM_READS=0`, or set it to `1` and commit before the full run.
+
+If you want to measure the effect yourself, run the pair twice, once with `TRIM_READS=0` and once with `1`, under two `RUN_ID`s. The FASTQ and reference caches are shared, so the second run skips those. Then compare both PASS VCFs against the SEQC2 truth set.
 
 ---
 

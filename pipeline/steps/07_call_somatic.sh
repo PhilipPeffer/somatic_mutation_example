@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 6: somatic SNV/indel calling on the tumor-normal pair.
+# Step 7: somatic SNV/indel calling on the tumor-normal pair.
 #
 # CALLER=tnhaplotyper2 (default) - Sentieon's implementation of GATK Mutect2
 #   TNhaplotyper2      = Mutect2 (with af-only gnomAD germline resource + PON)
