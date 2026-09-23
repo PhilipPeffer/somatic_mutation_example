@@ -4,11 +4,15 @@
 #   Ensembl VEP (offline cache)  -> <RUN_ID>.<caller>.pass.vep.vcf.gz
 #     --everything: consequence per transcript, SYMBOL, HGVS, canonical/MANE,
 #     SIFT/PolyPhen, gnomAD exome+genome and 1000G AFs, ClinVar significance,
-#     COSMIC/dbSNP IDs of co-located variants, PubMed. The pick flags match
+#     COSMIC/dbSNP IDs of co-located variants, PubMed.
+#     --clinvar_somatic_classification adds ClinVar's somatic (oncogenicity /
+#     clinical impact) classification of known variants, which --everything
+#     leaves out: CLINVAR_SOMATIC_CLASSIFICATION. The pick flags match
 #     what vcf2maf expects; every transcript's annotation is kept in CSQ.
 #   vcf2maf (--inhibit-vep)      -> <RUN_ID>.<caller>.pass.maf
 #     One line per variant on the picked transcript, with tumor/normal
 #     depths: the MAF format used by GDC/TCGA, cBioPortal and maftools.
+#     --retain-ann keeps CLINVAR_SOMATIC_CLASSIFICATION as an extra MAF column.
 #
 # VEP and vcf2maf live in their own pixi environment ("annotate"). The VEP
 # cache (~25 GB, Ensembl release VEP_CACHE_VERSION, GRCh38) is downloaded once,
@@ -74,7 +78,8 @@ annotate_somatic() {
     --species homo_sapiens --assembly GRCh38 --fasta "$REF" \
     --input_file "$p.vcf.gz" --format vcf --vcf --output_file "$p.vep.vcf" --force_overwrite \
     --fork "$forks" --buffer_size 5000 --no_progress \
-    --everything --check_existing --failed 1 --shift_hgvs 1 --total_length \
+    --everything --clinvar_somatic_classification \
+    --check_existing --failed 1 --shift_hgvs 1 --total_length \
     --allele_number --no_escape --xref_refseq \
     --flag_pick_allele --pick_order canonical,tsl,biotype,rank,ccds,length \
     --stats_file "$WORK/metrics/$RUN_ID.$CALLER.vep_summary.html" \
@@ -85,6 +90,7 @@ annotate_somatic() {
     --ref-fasta "$REF" --ncbi-build GRCh38 --species homo_sapiens \
     --tumor-id "$TUMOR" --normal-id "$NORMAL" \
     --vcf-tumor-id "$TUMOR" --vcf-normal-id "$NORMAL" \
+    --retain-ann CLINVAR_SOMATIC_CLASSIFICATION \
     --tmp-dir "$WORK/intermediate"
 
   bgzip -f -@ "$NT" "$p.vep.vcf"

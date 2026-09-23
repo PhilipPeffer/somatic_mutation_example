@@ -328,7 +328,7 @@ pixi run -e cloud fetch-results            # add --bams to also download the BAM
 | `vcf/<RUN_ID>.tnhaplotyper2.filtered.vcf.gz` | all candidate somatic calls, `FILTER` column set by TNfilter |
 | `vcf/<RUN_ID>.tnhaplotyper2.pass.vcf.gz` (+ `.tbi`) | **final somatic SNVs/indels (`FILTER=PASS`)** |
 | `vcf/<RUN_ID>.tnhaplotyper2.pass.vep.vcf.gz` (+ `.tbi`) | the same calls with VEP annotation (`CSQ` INFO field, all transcripts; the vcf2maf-preferred one flagged `PICK`) |
-| `vcf/<RUN_ID>.tnhaplotyper2.pass.maf` | **annotated calls as a MAF**, one row per variant: gene, `Variant_Classification`, HGVSc/HGVSp, tumor/normal depths and alt counts, population AFs |
+| `vcf/<RUN_ID>.tnhaplotyper2.pass.maf` | **annotated calls as a MAF**, one row per variant: gene, `Variant_Classification`, HGVSc/HGVSp, tumor/normal depths and alt counts, population AFs, `CLINVAR_SOMATIC_CLASSIFICATION` |
 | `vcf/<RUN_ID>.tnhaplotyper2.unfiltered.vcf.gz` | raw caller output |
 | `vcf/<RUN_ID>.contamination.txt`, `*_segments.txt`, `*.orientation_priors.txt` | contamination estimate and filter inputs |
 | `metrics/fastqc/<rg>_R{1,2}_fastqc.*`, `<rg>_val_{1,2}_fastqc.*` | FastQC on the raw and the trimmed reads, per read group |
@@ -485,7 +485,10 @@ What runs:
    - consequence and impact for every overlapping transcript, with gene symbol, HGVSc/HGVSp, canonical/MANE, exon/intron number and protein domains;
    - SIFT and PolyPhen predictions;
    - gnomAD exome and genome and 1000 Genomes allele frequencies;
-   - IDs of known variants at the same position (dbSNP and COSMIC), their ClinVar significance and PubMed references.
+   - IDs of known variants at the same position (dbSNP and COSMIC), their ClinVar significance and PubMed references;
+   - ClinVar's **somatic classification** of those known variants (`CLINVAR_SOMATIC_CLASSIFICATION`, from `--clinvar_somatic_classification`, which `--everything` doesn't include). This is ClinVar's oncogenicity/clinical-impact assessment for somatic variants, separate from the germline `CLIN_SIG`.
+
+   The COSMIC data here is IDs only, with no sample counts or tumor types, and a COSMIC ID is attached to its position rather than to the specific base change. Full COSMIC annotation needs a licensed COSMIC download added as a VEP `--custom` track.
 
    The pick options match what vcf2maf expects.
 2. **vcf2maf** (`--inhibit-vep`, so it reuses the VEP output) writes one row per variant for the picked transcript. It includes `Variant_Classification` (Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, …) and tumor/normal depths and alt counts.
