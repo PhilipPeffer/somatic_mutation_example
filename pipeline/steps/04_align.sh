@@ -6,8 +6,8 @@
 #                        number of threads/instance type (reproducibility)
 #   sentieon util sort = coordinate sort + BAM + index (like samtools sort)
 #
-# Before aligning: FastQC on the raw reads (in the background) and, if
-# TRIM_READS=1, Trim Galore; see 03_fastq_qc_trim.sh.
+# Before aligning: Trim Galore (TRIM_READS=1, default) and FastQC on the raw
+# and trimmed reads (in the background); see 03_fastq_qc_trim.sh.
 #
 # ALT-aware alignment is enabled automatically because the reference ships the
 # bwa .alt file. The sorted BAM goes to s3://$BUCKET/intermediate/$RUN_ID/ so
@@ -20,10 +20,11 @@ align_read_group() {
   local r1=$fq/R1.fastq.gz r2=$fq/R2.fastq.gz
 
   name_fastq_for_reports "$rg" "$fq"
-  fastqc_start "$rg" "$fq"
-  if [[ "${TRIM_READS:-0}" == 1 ]]; then
+  fastqc_start "${rg}_raw" "$fq/${rg}_R1.fastq.gz" "$fq/${rg}_R2.fastq.gz"
+  if [[ "${TRIM_READS:-1}" == 1 ]]; then
     trimmed=$(trim_reads "$rg" "$fq")
     r1=${trimmed% *} r2=${trimmed#* }
+    fastqc_start "${rg}_trimmed" "$r1" "$r2"
   fi
 
   sentieon bwa mem \

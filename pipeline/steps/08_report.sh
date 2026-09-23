@@ -37,7 +37,7 @@ make_report() {
     --arg sratools "$(fasterq-dump --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" \
     --arg fastqc "$(fastqc --version 2>/dev/null | head -1)" \
     --arg trim_galore "$(trim_galore --version 2>/dev/null | head -1)" \
-    --arg run_fastqc "${RUN_FASTQC:-1}" --arg trim_reads "${TRIM_READS:-0}" --arg trim_args "${TRIM_ARGS:-}" \
+    --arg run_fastqc "${RUN_FASTQC:-1}" --arg trim_reads "${TRIM_READS:-1}" --arg trim_args "${TRIM_ARGS:-}" \
     --arg pixi_lock_sha256 "$(sha256sum "$REPO_DIR/pixi.lock" | cut -d' ' -f1)" \
     --arg tumor "$TUMOR" --arg normal "$NORMAL" \
     --arg subsample "$SUBSAMPLE_READS" --arg intervals "$CALL_INTERVALS" \

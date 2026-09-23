@@ -47,7 +47,7 @@ Everything runs from this repository in a GitHub Codespace. There's no workflow 
                                                    │   0 Sentieon + license
                                                    │   1 GRCh38 bundle ◀── public Broad/GATK buckets (cached in S3)
                                                    │   2 FASTQ         ◀── s3://sra-pub-run-odp (AWS Open Data)
-                                                   │   3 FastQC (+ optional Trim Galore)  4 align  5 dedup
+                                                   │   3 Trim Galore + FastQC  4 align  5 dedup
                                                    │   6 BQSR  7 call  8 report
                                                    │   each step → s3://BUCKET/runs/<RUN_ID>/checkpoints/*.done
                                                    └─ uploads logs, terminates itself
@@ -130,7 +130,7 @@ Everything else has working defaults:
 - `SENTIEON_VERSION`.
 - `SENTIEON_LICENSE_S3=s3://$BUCKET/license/sentieon.lic`, or `SENTIEON_LICENSE_SERVER=host:port`.
 - `CALLER=tnhaplotyper2`.
-- `RUN_FASTQC=1` and `TRIM_READS=0`: FastQC on, trimming off. See [step 13](#pre-alignment-qc-and-trimming) for why, and when to turn trimming on.
+- `TRIM_READS=1`, `TRIM_ARGS="--length 36"` and `RUN_FASTQC=1`: Trim Galore adapter/quality trimming, with FastQC before and after. See [step 13](#pre-alignment-qc-and-trimming) for the rationale.
 - `RUN_ID=seqc2_wgs_SRR7890893_vs_SRR7890943_v1`.
 
 `config/samples.tsv` already contains the pair:
@@ -234,7 +234,7 @@ What to check in `results/<RUN_ID>_smoke/`:
 - `logs/pipeline.log` ends with `PIPELINE FINISHED OK`;
 - `vcf/*.tnhaplotyper2.pass.vcf.gz` exists (with 2 M read pairs expect only a handful of calls);
 - `report/run_manifest.json` shows the Sentieon version and instance type.
-- The FastQC section of `report/<RUN_ID>_smoke.multiqc.html`, especially *Adapter Content*. Use it to decide on `TRIM_READS` before the full run.
+- The FastQC and Trim Galore sections of `report/<RUN_ID>_smoke.multiqc.html`. *Adapter Content* should be near zero for the trimmed reads (`*_val_1/2`), and only a small fraction of pairs should be removed.
 
 If the license is the problem, the log fails within the first few minutes with a Sentieon license error. See [Troubleshooting](#15-troubleshooting).
 
@@ -263,8 +263,8 @@ Close the Codespace if you like; the instance works on its own and terminates it
 | boot, NVMe setup, pixi env, Sentieon install | 5–10 min |
 | reference bundle (first run only, then cached) | 5–10 min |
 | SRA → FASTQ.gz, both samples (first run only, then cached) | 1–2 h |
-| FastQC on raw reads | runs alongside alignment; adds ≲ 30 min |
-| Trim Galore (only if `TRIM_READS=1`) | +10–30 min per sample |
+| Trim Galore (default on) | 10–30 min per sample |
+| FastQC, raw + trimmed reads | runs alongside alignment; adds ≲ 30 min |
 | alignment, both samples | 2.5–4 h |
 | metrics + dedup, both | 40–60 min |
 | BQSR + coverage, both | 30–45 min |
@@ -326,8 +326,8 @@ pixi run -e cloud fetch-results            # add --bams to also download the BAM
 | `vcf/<RUN_ID>.tnhaplotyper2.pass.vcf.gz` (+ `.tbi`) | **final somatic SNVs/indels (`FILTER=PASS`)** |
 | `vcf/<RUN_ID>.tnhaplotyper2.unfiltered.vcf.gz` | raw caller output |
 | `vcf/<RUN_ID>.contamination.txt`, `*_segments.txt`, `*.orientation_priors.txt` | contamination estimate and filter inputs |
-| `metrics/fastqc/<rg>_R{1,2}_fastqc.{html,zip}` | FastQC on the raw reads, per read group |
-| `metrics/trimming/<rg>_R{1,2}.fastq.gz_trimming_report.*` | Trim Galore reports (only if `TRIM_READS=1`) |
+| `metrics/fastqc/<rg>_R{1,2}_fastqc.*`, `<rg>_val_{1,2}_fastqc.*` | FastQC on the raw and the trimmed reads, per read group |
+| `metrics/trimming/<rg>_R{1,2}.fastq.gz_trimming_report.*` | Trim Galore reports: adapters found, bases trimmed, pairs removed |
 | `metrics/<sample>.*` | alignment, insert size, GC bias, base quality, duplication, WGS coverage (+ PDF plots) |
 | `metrics/<RUN_ID>.*.bcftools_stats.txt` | VCF summary statistics |
 | `report/<RUN_ID>.multiqc.html` | one-page QC report (open it in the browser) |
@@ -413,7 +413,7 @@ All commands are in `pipeline/steps/*.sh`, one short, commented file per step. `
 | 0 | install + license | `sentieon licclnt ping` (server licenses) | — |
 | 1 | reference | Broad hg38 v0 FASTA + bwa index (with `.alt`), dbSNP 138, Mills + known indels, af-only gnomAD, 1000G PON, small_exac_common_3 | GATK resource bundle |
 | 2 | FASTQ | `fasterq-dump --split-3` → `pigz` (smoke test: `fastq-dump -X N`) | — |
-| 3 | pre-alignment QC, per read group | `fastqc` on raw reads (background); optional `trim_galore --paired` | — |
+| 3 | trimming + QC, per read group | `trim_galore --paired --length 36`; `fastqc` on raw and trimmed reads (background) | — (SEQC2 used Trimmomatic) |
 | 4 | align, per read group | `sentieon bwa mem -K 10000000 -R @RG… \| sentieon util sort --sam2bam` | `bwa mem \| samtools sort` |
 | 5 | metrics + dedup, per sample | `driver --algo MeanQualityByCycle/QualDistribution/GCBias/AlignmentStat/InsertSizeMetricAlgo`; `LocusCollector` + `Dedup` | CollectMultipleMetrics; MarkDuplicates |
 | 6 | BQSR + coverage, per sample | `driver --algo QualCal -k dbSNP -k Mills -k known_indels --algo WgsMetricsAlgo` | BaseRecalibrator; CollectWgsMetrics |
@@ -432,26 +432,34 @@ Settings in `config/pipeline.env`:
 
 | setting | default | effect |
 |---|---|---|
-| `RUN_FASTQC` | `1` | FastQC on each read group's raw R1/R2 |
-| `TRIM_READS` | `0` | `1` = Trim Galore (adapter + 3' quality trimming) before alignment |
-| `TRIM_ARGS` | `""` | extra Trim Galore options, e.g. `"--length 36"` or `"--fastqc"` for post-trim FastQC |
+| `TRIM_READS` | `1` | Trim Galore adapter + 3' quality trimming before alignment (`0` = align the raw reads) |
+| `TRIM_ARGS` | `"--length 36"` | Trim Galore options. Defaults: adapter auto-detected, `-q 20`, and pairs with a mate shorter than 36 bp are dropped |
+| `RUN_FASTQC` | `1` | FastQC on each read group's raw R1/R2 and, when trimming, on the trimmed reads |
 
-Both tools run inside each read group's align step, on the local FASTQ.
+Both tools run inside each read group's align step, on the local FASTQ. The trimmed reads are temporary; only the reports are kept.
 
-- **FastQC is always worth running.** It's the first look at the raw data: per-base quality, adapter content, GC, overrepresented sequences and poly-G tails. It runs in the background while the reads are aligned, so it costs little wall time. The reports are part of the MultiQC report.
-- **Trimming is optional, and off by default for this WGS variant-calling pipeline:**
-  - BWA-MEM does local alignment and soft-clips adapter read-through and low-quality ends. Those bases don't reach the variant caller.
-  - GATK best practices for germline and somatic short variants, which Sentieon mirrors, align untrimmed reads. BQSR then corrects base-quality miscalibration and TNhaplotyper2 ignores low-quality bases.
-  - Quality trimming makes read lengths uneven and discards data. With 150 bp reads and ~350–450 bp inserts, adapter read-through is rare in standard Illumina WGS libraries.
-- **When to turn it on:**
-  - FastQC's *Adapter Content* plot shows substantial read-through, e.g. short inserts, degraded or FFPE DNA, or low-input libraries.
-  - Nextera/transposase libraries.
-  - Poly-G tails from 2-colour chemistry (NovaSeq, NextSeq). Trim Galore 2.x auto-detects these.
-  - Your lab's SOP requires trimming.
-  Trim Galore 2.x is a fast Rust rewrite, so it adds only minutes per sample. The trimmed reads are temporary; only the reports are kept.
-- **Suggested workflow for this dataset:** run the smoke test and look at FastQC in `report/<RUN_ID>_smoke.multiqc.html`. Then either keep `TRIM_READS=0`, or set it to `1` and commit before the full run.
+**Why trim by default.**
+- **Sensitivity.** Sentieon's somatic callers are built to find low-frequency variants. Adapter sequence soft-clipped at the ends of reads can look like a low-VAF somatic variant, especially where local reassembly uses soft-clipped bases. Removing adapters and low-quality 3' ends before alignment reduces that background noise.
+- **Consistency with SEQC2.** The consortium trimmed adapters and low-quality bases (with Trimmomatic) before aligning. Doing the same keeps benchmarks against its truth set more like-for-like.
+- **Cost.** It adds only minutes per sample.
 
-If you want to measure the effect yourself, run the pair twice, once with `TRIM_READS=0` and once with `1`, under two `RUN_ID`s. The FASTQ and reference caches are shared, so the second run skips those. Then compare both PASS VCFs against the SEQC2 truth set.
+This differs from the GATK germline best-practice default of aligning untrimmed reads and relying on BWA-MEM soft-clipping plus BQSR. For sensitive somatic calling, light trimming is a common and defensible choice.
+
+**Why Trim Galore.** Trim Galore 2.x is a Rust rewrite with the familiar 0.6.x options and report format. It auto-detects the adapter (Illumina, Nextera, small RNA, BGI) and poly-G tails, and MultiQC reads its reports. It's fast enough for full WGS.
+- **Trimmomatic** would match SEQC2's exact trimmer, but it's slower and needs adapter files specified by hand. The SEQC2 truth set combines many pipelines, so trimmer choice isn't critical for benchmarking.
+- **fastp** is another good option, but it would replace the separate FastQC reports.
+
+**Tuning.**
+- For lighter adapter trimming, add `--stringency 3` to `TRIM_ARGS`. It requires at least 3 bp of adapter overlap, where the default of 1 bp clips a single matching base from many reads.
+- For 2-colour data, add `--nextseq 20`.
+- Set `TRIM_READS=0` to reproduce a no-trimming pipeline.
+
+**FastQC.**
+- The raw-read reports (`<rg>_R1/_R2`) show what the sequencer produced: per-base quality, adapter content, GC and overrepresented sequences.
+- The trimmed-read reports (`<rg>_val_1/_val_2`) confirm that adapters are gone.
+- Both run in the background while the reads are aligned, so they cost little wall time. All reports are in the MultiQC report.
+
+**Measure the effect yourself.** Run the pair twice under two `RUN_ID`s, with `TRIM_READS=1` and `TRIM_READS=0`. The FASTQ and reference caches are shared, so the second run skips those steps. Then compare both PASS VCFs against the SEQC2 truth set; look especially at low-VAF calls near read ends.
 
 ---
 

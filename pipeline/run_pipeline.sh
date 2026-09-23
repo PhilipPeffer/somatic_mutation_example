@@ -12,7 +12,7 @@
 #   0  install Sentieon + license check          (per instance)
 #   1  reference bundle (GRCh38)                 (once per bucket, cached in S3)
 #   2  SRA -> paired FASTQ.gz                    (once per read group, cached in S3)
-#   3  FastQC (+ optional Trim Galore), per read group  } one checkpoint
+#   3  Trim Galore + FastQC, per read group             } one checkpoint
 #   4  bwa mem + sort, per read group                    } per read group
 #   5  QC metrics + duplicate marking, per sample
 #   6  base quality score recalibration + coverage metrics, per sample
@@ -86,7 +86,7 @@ STARTED_UTC=$(date -u +%FT%TZ)
 
 log "run=${RUN_ID} git=${GIT_SHA} instance=${INSTANCE_TYPE} threads=${NT} scratch=${SCRATCH}"
 log "caller=${CALLER} subsample_reads=${SUBSAMPLE_READS} call_intervals=${CALL_INTERVALS:-<whole genome>}"
-log "fastqc=${RUN_FASTQC:-1} trim_reads=${TRIM_READS:-0} trim_args=${TRIM_ARGS:-<none>}"
+log "fastqc=${RUN_FASTQC:-1} trim_reads=${TRIM_READS:-1} trim_args=${TRIM_ARGS:-<none>}"
 is_dry_run && log "DRY RUN: external commands are printed, not executed"
 
 load_samples "$SAMPLES_TSV"
