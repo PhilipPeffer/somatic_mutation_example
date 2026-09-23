@@ -67,6 +67,7 @@ chmod +x /usr/local/bin/pixi
 export PIXI_CACHE_DIR=/scratch/pixi-cache
 cd /scratch/code
 pixi install -e pipeline --frozen
+pixi install -e annotate --frozen   # VEP + vcf2maf (used by step 8); fail early if unavailable
 
 # 5. Run. Resumes from S3 checkpoints if this RUN_ID ran before.
 pixi run -e pipeline --frozen bash pipeline/run_pipeline.sh

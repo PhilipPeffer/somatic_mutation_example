@@ -17,7 +17,8 @@
 #   5  QC metrics + duplicate marking, per sample
 #   6  base quality score recalibration + coverage metrics, per sample
 #   7  somatic calling + filtering (TNhaplotyper2 by default)
-#   8  QC report + run manifest
+#   8  annotation: VEP (offline cache, once per bucket) + vcf2maf -> MAF
+#   9  QC report + run manifest
 
 set -euo pipefail
 
@@ -68,6 +69,10 @@ FASTQ_DIR=$SCRATCH/fastq
 RUN_S3=s3://$BUCKET/runs/$RUN_ID
 INTER_S3=s3://$BUCKET/intermediate/$RUN_ID   # expired by an S3 lifecycle rule
 WORK=$SCRATCH/runs/$RUN_ID
+ANNOTATE=${ANNOTATE:-1}
+VEP_CACHE_VERSION=${VEP_CACHE_VERSION:-116}
+VEP_S3=s3://$BUCKET/references/vep
+VEP_DIR=$SCRATCH/ref/vep
 
 GIT_SHA=$(cat "$REPO_DIR/GIT_SHA" 2>/dev/null || git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
 INSTANCE_TYPE=$(imds meta-data/instance-type || echo unknown)
@@ -87,6 +92,7 @@ STARTED_UTC=$(date -u +%FT%TZ)
 log "run=${RUN_ID} git=${GIT_SHA} instance=${INSTANCE_TYPE} threads=${NT} scratch=${SCRATCH}"
 log "caller=${CALLER} subsample_reads=${SUBSAMPLE_READS} call_intervals=${CALL_INTERVALS:-<whole genome>}"
 log "fastqc=${RUN_FASTQC:-1} trim_reads=${TRIM_READS:-1} trim_args=${TRIM_ARGS:-<none>}"
+log "annotate=${ANNOTATE} vep_cache=${VEP_CACHE_VERSION}"
 is_dry_run && log "DRY RUN: external commands are printed, not executed"
 
 load_samples "$SAMPLES_TSV"
@@ -129,6 +135,12 @@ for sm in "$TUMOR" "$NORMAL"; do                                    # 5 + 6
 done
 
 step "call_${CALLER}" call_somatic                                  # 7
-step "report" make_report                                           # 8
+
+if [[ "$ANNOTATE" == 1 ]]; then                                     # 8
+  step_at "$VEP_S3/$(vep_cache_tarball).ready" "vep_cache_${VEP_CACHE_VERSION}" prepare_vep_cache
+  step "annotate_${CALLER}" annotate_somatic
+fi
+
+step "report" make_report                                           # 9
 
 log "Results: ${RUN_S3}/vcf/  (fetch with: pixi run -e cloud fetch-results)"

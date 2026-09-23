@@ -53,9 +53,24 @@ fastqc = ">=0.12.1,<0.13"
 trim-galore = ">=2.3,<3"
 multiqc = ">=1.25,<2"
 
+# Variant annotation (VEP + vcf2maf). Kept separate because ensembl-vep's
+# Perl/htslib stack pins an older zlib than trim-galore 2.x allows. The
+# pipeline calls it with `pixi run -e annotate`, which installs it from the
+# lockfile on first use. The VEP cache release must match the VEP major version
+# (VEP_CACHE_VERSION in config/pipeline.env).
+[feature.annotate]
+channels = [{ channel = "conda-forge", priority = 10 }, "bioconda"]
+
+[feature.annotate.dependencies]
+ensembl-vep = "116.*"
+vcf2maf = "1.6.*"
+samtools = "*"
+htslib = "*"
+
 [environments]
 cloud = { features = ["cloud"], no-default-feature = true }
 pipeline = { features = ["pipeline"], no-default-feature = true }
+annotate = { features = ["annotate"], no-default-feature = true }
 
 # Entry points, run from the Codespace, e.g. `pixi run -e cloud launch --smoke`.
 [feature.cloud.tasks]

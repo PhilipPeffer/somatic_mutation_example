@@ -48,7 +48,7 @@ Everything runs from this repository in a GitHub Codespace. There's no workflow 
                                                    │   1 GRCh38 bundle ◀── public Broad/GATK buckets (cached in S3)
                                                    │   2 FASTQ         ◀── s3://sra-pub-run-odp (AWS Open Data)
                                                    │   3 Trim Galore + FastQC  4 align  5 dedup
-                                                   │   6 BQSR  7 call  8 report
+                                                   │   6 BQSR  7 call  8 annotate (VEP → MAF)  9 report
                                                    │   each step → s3://BUCKET/runs/<RUN_ID>/checkpoints/*.done
                                                    └─ uploads logs, terminates itself
  pixi run -e cloud status / logs / fetch-results ◀─ s3://BUCKET/runs/<RUN_ID>/
@@ -90,7 +90,7 @@ pixi run -e cloud aws --version        # aws-cli/2.x
 pixi task list -e cloud                # aws-setup, launch, status, logs, fetch-results, teardown, dry-run, lint
 ```
 
-> The `cloud` environment holds the tools the Codespace needs (AWS CLI, jq, shellcheck). The `pipeline` environment holds the tools the EC2 instance needs (samtools, bcftools, htslib, sra-tools, pigz, FastQC, Trim Galore, MultiQC, AWS CLI). Both are pinned exactly in `pixi.lock`. Sentieon itself isn't a conda package; it's installed from its release tarball at a pinned version.
+> The `cloud` environment holds the tools the Codespace needs (AWS CLI, jq, shellcheck). The `pipeline` environment holds the tools the EC2 instance needs (samtools, bcftools, htslib, sra-tools, pigz, FastQC, Trim Galore, MultiQC, AWS CLI). The `annotate` environment holds Ensembl VEP and vcf2maf; it's separate because VEP's Perl/htslib stack conflicts with Trim Galore 2.x. All three are pinned exactly in `pixi.lock`. Sentieon itself isn't a conda package; it's installed from its release tarball at a pinned version.
 
 ### 2b. AWS credentials
 
@@ -131,6 +131,7 @@ Everything else has working defaults:
 - `SENTIEON_LICENSE_S3=s3://$BUCKET/license/sentieon.lic`, or `SENTIEON_LICENSE_SERVER=host:port`.
 - `CALLER=tnhaplotyper2`.
 - `TRIM_READS=1`, `TRIM_ARGS="--length 36"` and `RUN_FASTQC=1`: Trim Galore adapter/quality trimming, with FastQC before and after. See [step 13](#pre-alignment-qc-and-trimming) for the rationale.
+- `ANNOTATE=1` and `VEP_CACHE_VERSION=116`: the PASS calls are annotated with Ensembl VEP and converted to MAF. See [step 13](#annotation).
 - `RUN_ID=seqc2_wgs_SRR7890893_vs_SRR7890943_v1`.
 
 `config/samples.tsv` already contains the pair:
@@ -226,7 +227,7 @@ pixi run -e cloud logs --smoke
 pixi run -e cloud fetch-results --smoke
 ```
 
-It takes about 30–45 minutes, mostly for downloading the two `.sra` files and building the reference cache. The reference cache is reused by the full run.
+It takes about 45–75 minutes. Most of that is one-time downloads: the two `.sra` files, the reference bundle and the ~25 GB VEP cache from Ensembl. The reference and VEP caches are reused by the full run.
 
 The smoke run uses `RUN_ID=<RUN_ID>_smoke` and its own FASTQ cache (`fastq/<run>/subsample_2000000/`), so it never mixes with the real run.
 
@@ -269,6 +270,8 @@ Close the Codespace if you like; the instance works on its own and terminates it
 | metrics + dedup, both | 40–60 min |
 | BQSR + coverage, both | 30–45 min |
 | TNhaplotyper2 + filters | 2–4 h |
+| VEP cache download (first run only, then cached) | 10–40 min, depends on Ensembl FTP speed |
+| annotation (VEP + vcf2maf) | 5–20 min |
 | report | < 5 min |
 | **total** | **~7–12 h** |
 
@@ -324,12 +327,15 @@ pixi run -e cloud fetch-results            # add --bams to also download the BAM
 |---|---|
 | `vcf/<RUN_ID>.tnhaplotyper2.filtered.vcf.gz` | all candidate somatic calls, `FILTER` column set by TNfilter |
 | `vcf/<RUN_ID>.tnhaplotyper2.pass.vcf.gz` (+ `.tbi`) | **final somatic SNVs/indels (`FILTER=PASS`)** |
+| `vcf/<RUN_ID>.tnhaplotyper2.pass.vep.vcf.gz` (+ `.tbi`) | the same calls with VEP annotation (`CSQ` INFO field, all transcripts; the vcf2maf-preferred one flagged `PICK`) |
+| `vcf/<RUN_ID>.tnhaplotyper2.pass.maf` | **annotated calls as a MAF**, one row per variant: gene, `Variant_Classification`, HGVSc/HGVSp, tumor/normal depths and alt counts, population AFs |
 | `vcf/<RUN_ID>.tnhaplotyper2.unfiltered.vcf.gz` | raw caller output |
 | `vcf/<RUN_ID>.contamination.txt`, `*_segments.txt`, `*.orientation_priors.txt` | contamination estimate and filter inputs |
 | `metrics/fastqc/<rg>_R{1,2}_fastqc.*`, `<rg>_val_{1,2}_fastqc.*` | FastQC on the raw and the trimmed reads, per read group |
 | `metrics/trimming/<rg>_R{1,2}.fastq.gz_trimming_report.*` | Trim Galore reports: adapters found, bases trimmed, pairs removed |
 | `metrics/<sample>.*` | alignment, insert size, GC bias, base quality, duplication, WGS coverage (+ PDF plots) |
 | `metrics/<RUN_ID>.*.bcftools_stats.txt` | VCF summary statistics |
+| `metrics/<RUN_ID>.*.vep_summary.html` | VEP summary: consequence types, genes, coding changes (also in MultiQC) |
 | `report/<RUN_ID>.multiqc.html` | one-page QC report (open it in the browser) |
 | `report/run_manifest.json` | git SHA, instance/AMI, tool versions, parameters, per-step timings, VCF checksum, call counts |
 | `logs/` | full pipeline log, bootstrap logs, step timings |
@@ -364,7 +370,7 @@ Estimates only. Spot prices move; check the EC2 console's *Spot Requests → Pri
 | Sentieon | free (trial) |
 | EC2 spot, 64 vCPU with NVMe, ~7–12 h at ~$1.0–1.6/h | **~$8–20** |
 | smoke test | ~$0.5–1 |
-| S3 storage after the run (FASTQ ~190 GB, BAMs ~200 GB, reference ~30 GB) | ~$10/month until deleted |
+| S3 storage after the run (FASTQ ~190 GB, BAMs ~200 GB, reference ~30 GB, VEP cache ~25 GB) | ~$10/month until deleted |
 | data transfer | ~$0: SRA and S3 are in-region; `fetch-results` without BAMs is < 1 GB |
 
 For comparison, the same instance on-demand costs about $3.2/h.
@@ -391,6 +397,7 @@ What is pinned, and where:
 | pixi itself | `PIXI_VERSION` in `config/pipeline.env` and `.devcontainer/Dockerfile` |
 | Sentieon | `SENTIEON_VERSION`; the tarball is cached in `s3://$BUCKET/software/` so it stays available |
 | reference + resources | URLs and **MD5s** in `config/references_hg38.tsv`, verified on download; cached in S3 with `md5sums.txt` |
+| annotation | VEP and vcf2maf versions in `pixi.lock`; VEP cache release `VEP_CACHE_VERSION` (checked against Ensembl's CHECKSUMS, cached in S3 with its MD5); both recorded in the manifest |
 | OS image | AMI resolved once by `aws-setup`, pinned in the launch template, recorded in the manifest |
 | input data | SRA accessions; FASTQ MD5s stored next to the cached FASTQ and verified before alignment |
 | alignment determinism | `bwa mem -K 10000000`: results don't depend on thread count or instance type |
@@ -418,7 +425,8 @@ All commands are in `pipeline/steps/*.sh`, one short, commented file per step. `
 | 5 | metrics + dedup, per sample | `driver --algo MeanQualityByCycle/QualDistribution/GCBias/AlignmentStat/InsertSizeMetricAlgo`; `LocusCollector` + `Dedup` | CollectMultipleMetrics; MarkDuplicates |
 | 6 | BQSR + coverage, per sample | `driver --algo QualCal -k dbSNP -k Mills -k known_indels --algo WgsMetricsAlgo` | BaseRecalibrator; CollectWgsMetrics |
 | 7 | somatic calling | `driver -i T -q T.table -i N -q N.table --algo TNhaplotyper2 --germline_vcf gnomAD --pon PON --algo OrientationBias --algo ContaminationModel`, then `--algo TNfilter` | Mutect2 + LearnReadOrientationModel + GetPileupSummaries/CalculateContamination + FilterMutectCalls |
-| 8 | report | `bcftools stats`, MultiQC, `run_manifest.json` | — |
+| 8 | annotation | `vep --offline --cache --everything --flag_pick_allele …`, then `vcf2maf.pl --inhibit-vep` | Funcotator (MAF output) |
+| 9 | report | `bcftools stats`, MultiQC, `run_manifest.json` | — |
 
 Notes:
 - The recalibration tables are applied on the fly (`-q`) during calling, so no second copy of each BAM is written.
@@ -461,13 +469,45 @@ This differs from the GATK germline best-practice default of aligning untrimmed 
 
 **Measure the effect yourself.** Run the pair twice under two `RUN_ID`s, with `TRIM_READS=1` and `TRIM_READS=0`. The FASTQ and reference caches are shared, so the second run skips those steps. Then compare both PASS VCFs against the SEQC2 truth set; look especially at low-VAF calls near read ends.
 
+
+### Annotation
+
+Settings in `config/pipeline.env`:
+
+| setting | default | effect |
+|---|---|---|
+| `ANNOTATE` | `1` | annotate the PASS calls with VEP and write a MAF (`0` = stop at the VCF) |
+| `VEP_CACHE_VERSION` | `116` | Ensembl release of the offline cache; must match the pinned `ensembl-vep` |
+| `VEP_ARGS` | `""` | extra VEP options (plugins, `--custom` tracks) |
+
+What runs:
+1. **VEP** annotates the PASS VCF offline, against the Ensembl GRCh38 cache, with `--everything`. That gives:
+   - consequence and impact for every overlapping transcript, with gene symbol, HGVSc/HGVSp, canonical/MANE, exon/intron number and protein domains;
+   - SIFT and PolyPhen predictions;
+   - gnomAD exome and genome and 1000 Genomes allele frequencies;
+   - IDs of known variants at the same position (dbSNP and COSMIC), their ClinVar significance and PubMed references.
+
+   The pick options match what vcf2maf expects.
+2. **vcf2maf** (`--inhibit-vep`, so it reuses the VEP output) writes one row per variant for the picked transcript. It includes `Variant_Classification` (Missense_Mutation, Nonsense_Mutation, Frame_Shift_Del, …) and tumor/normal depths and alt counts.
+
+   MAF is the format used by GDC/TCGA and read by cBioPortal and maftools, e.g. `maftools::read.maf()` → oncoplots and mutational signatures.
+
+Why VEP + vcf2maf rather than the alternatives:
+- **VEP** is maintained by Ensembl alongside GENCODE, with a new release every few months. Its offline cache pins the whole annotation to one release, which suits reproducibility. It's what the GDC uses for somatic calls.
+- **Funcotator** (GATK) is a reasonable choice in a GATK-centred workflow and writes MAF directly. However, its somatic data-source bundle is ~17 GB and was last refreshed in 2023, so its annotations would be older.
+- **snpEff** is fast and simple, with a small database. It's good for quick consequence calls, but its annotation is thinner (fewer population and clinical fields) and it has no standard MAF path.
+- **ANNOVAR** requires registering to download and a licence for commercial use, so it can't be installed automatically and reproducibly from this repo.
+
+Annotation doesn't change which variants are called; it only describes them. For SEQC2 benchmarking, compare the PASS VCF with the truth set. Use the MAF to interpret the calls, e.g. which known breast-cancer driver genes are hit in HCC1395.
+
 ---
 
 ## 14. Customising
 
 - **Your own FASTQ:** upload it to S3 and use `s3://…/R1.fastq.gz,s3://…/R2.fastq.gz` as the `source` in `config/samples.tsv`.
 - **Multiple lanes:** add one row per lane or read group with the same `sample` and a unique `rg_id`. Lanes are aligned separately and merged at dedup.
-- **Different pair:** edit `config/samples.tsv` and use a new `RUN_ID`. The reference cache is shared.
+- **Different pair:** edit `config/samples.tsv` and use a new `RUN_ID`. The reference and VEP caches are shared.
+- **Annotation plugins or custom tracks:** add VEP options to `VEP_ARGS`, e.g. `--custom` with a local VCF such as a COSMIC or ClinVar release, or `--plugin` (plugin data files must be on the instance, e.g. fetched from your bucket). To move to a newer VEP, bump `ensembl-vep` in `pixi.toml` `[feature.annotate]` and `VEP_CACHE_VERSION` together, then run `pixi lock`.
 - **Bigger or smaller instances:** edit `INSTANCE_TYPES`. Keep types with ≥ 1.9 TB of local NVMe for WGS; otherwise `/scratch` falls back to the 60 GB root volume, which is far too small.
 - **Other regions:** possible, but the SRA download then crosses regions and you pay the transfer cost.
 
@@ -483,6 +523,7 @@ This differs from the GATK germline best-practice default of aligning untrimmed 
 | log: *cannot reach Sentieon license server* | wrong `host:port`, missing `SENTIEON_AUTH_*` values, or egress blocked |
 | log: *MD5 mismatch* for a reference file | transient download corruption. Relaunch; the reference step retries because its `_READY` marker was never written |
 | log: *FASTQ checksum mismatch* | corrupt FASTQ cache. Delete `s3://$BUCKET/fastq/<rg>/` and relaunch |
+| annotation fails: *Cache directory … not found* or a version error | `VEP_CACHE_VERSION` must equal the `ensembl-vep` major version in `pixi.toml`. If the Ensembl download failed, relaunch; the cache step retries from the Ensembl FTP site and then its EBI mirror |
 | `No space left on device` | the instance had no NVMe (a type outside the list), or the input is much bigger than expected. Use types with more instance storage (e.g. `*.24xlarge`, `i4i`) |
 | `launch`: *uncommitted changes* | commit (recommended), or pass `--allow-dirty` for experiments; the SHA is then tagged `-dirty-<timestamp>` |
 | want to debug a failed instance | set `KEEP_INSTANCE_ON_FAILURE=1`, commit, relaunch, connect with SSM. Run `teardown` when done |

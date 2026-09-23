@@ -55,7 +55,7 @@ pixi run -e cloud aws-setup                       # one time: bucket, IAM, secur
 set -a; source config/pipeline.env; set +a
 pixi run -e cloud aws s3 cp my.lic "$SENTIEON_LICENSE_S3"
 pixi run -e cloud dry-run                         # see every command, no cost
-pixi run -e cloud launch --smoke                  # ~30 min, ~$1: validates everything on a subset
+pixi run -e cloud launch --smoke                  # ~1 h, ~$1: validates everything on a subset (first run also caches references + VEP)
 pixi run -e cloud launch                          # full run, ~7–12 h, roughly $8–20 on spot
 pixi run -e cloud status                          # progress; rerun `launch` to resume after a spot interruption
 pixi run -e cloud fetch-results                   # VCFs, metrics, MultiQC report, run manifest → results/
@@ -66,11 +66,13 @@ pixi run -e cloud fetch-results                   # VCFs, metrics, MultiQC repor
 ```
 SRA (AWS Open Data) → FASTQ → Trim Galore + FastQC → Sentieon BWA-MEM + sort → metrics + dedup → BQSR
                    → TNhaplotyper2 (Mutect2-equivalent) + OrientationBias + ContaminationModel → TNfilter
-                   → PASS somatic SNV/indel VCF + QC report + run_manifest.json
+                   → PASS somatic SNV/indel VCF → Ensembl VEP + vcf2maf → annotated VCF + MAF
+                   → QC report + run_manifest.json
 ```
 
 - Reference: GRCh38 (Broad hg38 bundle). The public resources are gnomAD for germline AF, the 1000G panel of normals, and dbSNP, Mills and known indels for BQSR. All are pinned with MD5s in [`config/references_hg38.tsv`](config/references_hg38.tsv).
 - Preprocessing: Trim Galore trims adapters and low-quality 3' ends by default. This matches SEQC2, which trimmed with Trimmomatic before aligning, and keeps soft-clipped adapter remnants from showing up as low-VAF somatic artifacts. FastQC runs before and after trimming. Set `TRIM_READS=0` to align raw reads.
+- Annotation: Ensembl VEP (offline cache, release pinned) annotates the PASS calls, and vcf2maf converts them to MAF for cBioPortal/maftools. The walkthrough explains why VEP rather than Funcotator, snpEff or ANNOVAR.
 - Each step checkpoints to S3. A replacement spot instance resumes where the last one stopped.
 - The instance terminates itself when the run finishes, fails, or hits a hard runtime limit.
 
@@ -84,6 +86,6 @@ SRA (AWS Open Data) → FASTQ → Trim Galore + FastQC → Sentieon BWA-MEM + so
 | `aws/` | Codespace-side scripts: `setup_aws.sh`, `launch.sh`, `status.sh`, `logs.sh`, `fetch_results.sh`, `teardown.sh`; EC2 `user_data.sh.tpl`; IAM policies |
 | `pipeline/run_pipeline.sh` | the pipeline, run on the instance; the step implementations are in `pipeline/steps/` |
 | `pipeline/lib.sh` | checkpointing, S3 helpers, sample sheet, spot-interruption watcher, dry-run stubs |
-| `pixi.toml` / `pixi.lock` | pinned tool environments: `cloud` for the Codespace, `pipeline` for the EC2 instance. The default environment keeps the original exploratory GATK toolset |
+| `pixi.toml` / `pixi.lock` | pinned tool environments: `cloud` for the Codespace, and `pipeline` and `annotate` (VEP, vcf2maf) for the EC2 instance. The default environment keeps the original exploratory GATK toolset |
 | `.devcontainer/` | Codespace definition (installs pixi and the environments) |
 | `docs/WALKTHROUGH.md` | the full guide: setup, running, monitoring, costs, reproducibility, troubleshooting |

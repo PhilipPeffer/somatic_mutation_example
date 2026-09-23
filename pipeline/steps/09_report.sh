@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 8: QC summary, MultiQC report and a machine-readable run manifest
+# Step 9: QC summary, MultiQC report and a machine-readable run manifest
 # (everything needed to reproduce or audit the run), then clean up the
 # intermediate BAMs in S3.
 
@@ -18,10 +18,15 @@ make_report() {
     || warn "MultiQC failed"
 
   # Tool versions and checksums for the manifest.
-  local sentieon_ver="dry-run" vcf_md5="dry-run"
+  local sentieon_ver="dry-run" vcf_md5="dry-run" vep_ver="" maf_md5="" maf=$p.$CALLER.pass.maf
   if ! is_dry_run; then
     sentieon_ver=$(sentieon driver --version 2>&1 | head -1)
     vcf_md5=$(md5sum "$pass" | cut -d' ' -f1)
+    if [[ "$ANNOTATE" == 1 ]]; then
+      need "vcf/$(basename "$maf")"
+      maf_md5=$(md5sum "$maf" | cut -d' ' -f1)
+      vep_ver=$(annot_env vep --help 2>/dev/null | awk '/ensembl-vep/ {print $NF; exit}')
+    fi
   fi
   jq -n \
     --arg run_id "$RUN_ID" --arg git_sha "$GIT_SHA" \
@@ -37,6 +42,8 @@ make_report() {
     --arg sratools "$(fasterq-dump --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" \
     --arg fastqc "$(fastqc --version 2>/dev/null | head -1)" \
     --arg trim_galore "$(trim_galore --version 2>/dev/null | head -1)" \
+    --arg annotate "$ANNOTATE" --arg vep "$vep_ver" --arg vep_cache "$VEP_CACHE_VERSION" \
+    --arg maf "$( [[ "$ANNOTATE" == 1 ]] && basename "$maf" )" --arg maf_md5 "$maf_md5" \
     --arg run_fastqc "${RUN_FASTQC:-1}" --arg trim_reads "${TRIM_READS:-1}" --arg trim_args "${TRIM_ARGS:-}" \
     --arg pixi_lock_sha256 "$(sha256sum "$REPO_DIR/pixi.lock" | cut -d' ' -f1)" \
     --arg tumor "$TUMOR" --arg normal "$NORMAL" \
@@ -49,12 +56,13 @@ make_report() {
       instance:{type:$instance_type, id:$instance_id, ami:$ami_id, lifecycle:$lifecycle,
                 region:$region, threads:($threads|tonumber)},
       software:{sentieon:$sentieon, samtools:$samtools, bcftools:$bcftools,
-                sra_tools:$sratools, fastqc:$fastqc, trim_galore:$trim_galore,
+                sra_tools:$sratools, fastqc:$fastqc, trim_galore:$trim_galore, vep:$vep,
                 pixi_lock_sha256:$pixi_lock_sha256},
       params:{caller:$caller, subsample_reads:($subsample|tonumber), call_intervals:$intervals,
-              fastqc:($run_fastqc == "1"), trim_reads:($trim_reads == "1"), trim_args:$trim_args},
+              fastqc:($run_fastqc == "1"), trim_reads:($trim_reads == "1"), trim_args:$trim_args,
+              annotate:($annotate == "1"), vep_cache:(if $annotate == "1" then "\($vep_cache)_GRCh38" else null end)},
       samples:{tumor:$tumor, normal:$normal, sheet:$samples},
-      results:{pass_vcf:$pass_vcf, pass_vcf_md5:$pass_vcf_md5,
+      results:{pass_vcf:$pass_vcf, pass_vcf_md5:$pass_vcf_md5, maf:$maf, maf_md5:$maf_md5,
                pass_snvs:($snvs|tonumber? // null), pass_indels:($indels|tonumber? // null)},
       step_seconds:($timings | split("\n") | map(select(length>0) | split("\t") | {(.[0]):(.[1]|tonumber)}) | add)}' \
     > "$r/run_manifest.json"
