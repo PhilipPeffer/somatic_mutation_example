@@ -7,7 +7,7 @@ This guide takes you from an empty AWS account to a filtered somatic VCF for the
 | tumor  | `SRR7890893` | ~80 GB `.sra` |
 | normal | `SRR7890943` | ~67 GB `.sra` |
 
-These runs appear to be part of the SEQC2 somatic reference study: breast cancer line HCC1395 and matched normal HCC1395BL. Check the run metadata on the SRA page before relying on that.
+These are the SEQC2 somatic reference pair: breast cancer cell line HCC1395 and its matched normal, the B-lymphoblastoid line HCC1395BL from the same donor. See the [README](../README.md#the-dataset-seqc2-hcc1395--hcc1395bl) for background on the dataset and why it suits a learning example.
 
 Everything runs from this repository in a GitHub Codespace. There's no workflow orchestrator: one bash pipeline runs top to bottom on one EC2 spot instance. Each step checkpoints to S3, so a spot interruption costs at most one step.
 
@@ -344,7 +344,7 @@ jq . results/<RUN_ID>/report/run_manifest.json
 - estimated contamination (`contamination.txt`; it should be low for a cell line);
 - the SNV:indel ratio and Ti/Tv in the bcftools stats.
 
-If these runs are the SEQC2 HCC1395 pair, the SEQC2 consortium publishes a high-confidence somatic truth set. You can benchmark the PASS VCF against it with a tool such as `som.py` or `rtg vcfeval`. That's outside this pipeline.
+Because this is the SEQC2 HCC1395 pair, you can go beyond QC and measure accuracy. Benchmark the PASS VCF against the SEQC2 high-confidence somatic truth set (GRCh38) on the NCBI FTP site, `ReferenceSamples/seqc/Somatic_Mutation_WG/`. Restrict the comparison to the truth set's high-confidence regions BED and use a tool such as `som.py` or `rtg vcfeval`. That benchmarking is outside this pipeline.
 
 ---
 
