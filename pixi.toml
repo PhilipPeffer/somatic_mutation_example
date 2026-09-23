@@ -1,4 +1,4 @@
-[project]
+[workspace]
 authors = ["Philip Peffer <115198033+PhilipPeffer@users.noreply.github.com>"]
 channels = ["bioconda", "conda-forge"]
 name = "somatic_mutation_example"
@@ -21,3 +21,48 @@ bedtools = ">=2.31.1,<3"
 vcftools = ">=0.1.17,<0.2"
 tabix = ">=0.2.5,<0.3"
 tree = ">=2.3.2,<3"
+
+# ---------------------------------------------------------------------------
+# Environments used by the tumor-normal WGS pipeline (see docs/WALKTHROUGH.md).
+# They do not include the default feature above, so they resolve independently
+# of the legacy GATK/picard pins and get current htslib-based tools.
+#
+#   cloud    : used in the Codespace to drive AWS (create bucket/IAM, launch spot)
+#   pipeline : installed on the EC2 spot instance next to Sentieon
+# ---------------------------------------------------------------------------
+[feature.cloud]
+channels = [{ channel = "conda-forge", priority = 10 }, "bioconda"]
+
+[feature.cloud.dependencies]
+awscli = ">=2.15,<3"
+jq = ">=1.7,<2"
+shellcheck = ">=0.10,<1"
+
+[feature.pipeline]
+channels = [{ channel = "conda-forge", priority = 10 }, "bioconda"]
+
+[feature.pipeline.dependencies]
+awscli = ">=2.15,<3"
+jq = ">=1.7,<2"
+htslib = ">=1.21,<2"
+samtools = ">=1.21,<2"
+bcftools = ">=1.21,<2"
+sra-tools = ">=3.1,<4"
+pigz = ">=2.8,<3"
+fastqc = ">=0.12.1,<0.13"
+multiqc = ">=1.25,<2"
+
+[environments]
+cloud = { features = ["cloud"], no-default-feature = true }
+pipeline = { features = ["pipeline"], no-default-feature = true }
+
+# Entry points, run from the Codespace, e.g. `pixi run -e cloud launch --smoke`.
+[feature.cloud.tasks]
+aws-setup = { cmd = "bash aws/setup_aws.sh", description = "One-time AWS setup: bucket, IAM, security group, launch template" }
+launch = { cmd = "bash aws/launch.sh", description = "Launch the pipeline on a spot instance (--smoke, --dry-run)" }
+status = { cmd = "bash aws/status.sh", description = "Instance state, completed steps and log tail of the run" }
+logs = { cmd = "bash aws/logs.sh", description = "Print the pipeline log from S3" }
+fetch-results = { cmd = "bash aws/fetch_results.sh", description = "Download VCFs, metrics and report to results/<RUN_ID>/" }
+teardown = { cmd = "bash aws/teardown.sh", description = "Terminate the run's instance (--infra: delete AWS infrastructure)" }
+dry-run = { cmd = "bash pipeline/run_pipeline.sh", env = { DRY_RUN = "1" }, description = "Print every pipeline command locally without running it" }
+lint = { cmd = "shellcheck -x aws/*.sh pipeline/*.sh pipeline/steps/*.sh && bash -n aws/user_data.sh.tpl", description = "Static checks for all shell scripts" }

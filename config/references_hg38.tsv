@@ -1,0 +1,23 @@
+# GRCh38 reference bundle used by pipeline/steps/01_reference.sh
+# local_name<TAB>md5 (hex, from the GCS object metadata; "-" = not published, recorded on first download)<TAB>source_url
+# The bwa index files are published as *.fasta.64.*; they are renamed to *.fasta.* so Sentieon bwa finds them next to the FASTA.
+Homo_sapiens_assembly38.fasta	7ff134953dcca8c8997453bbb80b6b5e	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta
+Homo_sapiens_assembly38.fasta.fai	f76371b113734a56cde236bc0372de0a	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.fai
+Homo_sapiens_assembly38.dict	3884c62eb0e53fa92459ed9bff133ae6	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.dict
+Homo_sapiens_assembly38.fasta.alt	b07e65aa4425bc365141756f5c98328c	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.64.alt
+Homo_sapiens_assembly38.fasta.amb	e4dc4fdb7358198e0847106599520aa9	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.64.amb
+Homo_sapiens_assembly38.fasta.ann	af611ed0bb9487fb1ba4aa1a7e7ad21c	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.64.ann
+Homo_sapiens_assembly38.fasta.bwt	7f0c8dcfc86b7c2ce3e3a54118d68fbd	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.64.bwt
+Homo_sapiens_assembly38.fasta.pac	178862a79b043a2f974ef10e3877ef86	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.64.pac
+Homo_sapiens_assembly38.fasta.sa	91a5d5ed3986db8a74782e5f4519eb5f	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta.64.sa
+Homo_sapiens_assembly38.dbsnp138.vcf	-	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.dbsnp138.vcf
+Mills_and_1000G_gold_standard.indels.hg38.vcf.gz	2e02696032dcfe95ff0324f4a13508e3	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz
+Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi	4c807e2cbe0752c0c44ac82ff3b52025	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi
+Homo_sapiens_assembly38.known_indels.vcf.gz	14cc588a271951ac1806f9be895fb51f	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.known_indels.vcf.gz
+Homo_sapiens_assembly38.known_indels.vcf.gz.tbi	1a55fdfa6533ae5cbc70e8188e779229	https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.known_indels.vcf.gz.tbi
+af-only-gnomad.hg38.vcf.gz	a4209be7fb4b5a5a8d3b778132cb7401	https://storage.googleapis.com/gatk-best-practices/somatic-hg38/af-only-gnomad.hg38.vcf.gz
+af-only-gnomad.hg38.vcf.gz.tbi	a7efccb1519f046c19cdf9f28559d747	https://storage.googleapis.com/gatk-best-practices/somatic-hg38/af-only-gnomad.hg38.vcf.gz.tbi
+small_exac_common_3.hg38.vcf.gz	4c75c1755a45c64e8af7784db7fde009	https://storage.googleapis.com/gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz
+small_exac_common_3.hg38.vcf.gz.tbi	f650d1dda6bd68cba65d77f131147985	https://storage.googleapis.com/gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz.tbi
+1000g_pon.hg38.vcf.gz	e236330d8d156d2aad2d0930a2440177	https://storage.googleapis.com/gatk-best-practices/somatic-hg38/1000g_pon.hg38.vcf.gz
+1000g_pon.hg38.vcf.gz.tbi	b95230d6634c3926fb0b4f104518a0f5	https://storage.googleapis.com/gatk-best-practices/somatic-hg38/1000g_pon.hg38.vcf.gz.tbi

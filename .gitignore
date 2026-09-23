@@ -8,3 +8,15 @@
 *.fasta
 *.dict
 *.vcf.*
+# pipeline: never commit licenses, data or results
+*.lic
+config/overrides.env
+results/
+.dryrun/
+*.bam
+*.bai
+*.cram
+*.fastq
+*.fastq.gz
+*.fq.gz
+*.sra

@@ -1,0 +1,7 @@
+# One row per read group (sequencing run). Tab-separated.
+# sample: SM tag used in the BAM/VCF   role: tumor|normal
+# source: sra:<SRA run>  or  s3://.../R1.fastq.gz,s3://.../R2.fastq.gz
+# rg_id: read-group ID (unique)   library: LB tag   platform: PL tag
+#sample	role	source	rg_id	library	platform
+TUMOR_SRR7890893	tumor	sra:SRR7890893	SRR7890893	SRR7890893	ILLUMINA
+NORMAL_SRR7890943	normal	sra:SRR7890943	SRR7890943	SRR7890943	ILLUMINA

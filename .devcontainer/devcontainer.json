@@ -1,5 +1,5 @@
 {
-    "name": "my-project",
+    "name": "somatic_mutation_example",
     "build": {
       "dockerfile": "Dockerfile",
       "context": "..",
@@ -13,6 +13,8 @@
     "features": {
       "ghcr.io/devcontainers/features/docker-in-docker:2": {}
     },
+    // AWS credentials: add AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or use `aws configure sso`)
+    // as Codespaces secrets; see docs/WALKTHROUGH.md step 2. Region comes from config/pipeline.env.
     "mounts": ["source=${localWorkspaceFolderBasename}-pixi,target=${containerWorkspaceFolder}/.pixi,type=volume"],
-    "postCreateCommand": "sudo chown vscode .pixi && pixi install"
+    "postCreateCommand": "sudo chown vscode .pixi && pixi install && pixi install -e cloud"
 }

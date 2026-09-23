@@ -1,0 +1,3 @@
+# Scripts share variables through sourced files (config/pipeline.env, aws/common.sh,
+# pipeline/lib.sh, pipeline/steps/*.sh), which shellcheck cannot follow reliably.
+disable=SC1091,SC2034
